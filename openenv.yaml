@@ -1,0 +1,79 @@
+name: clinical-triage-coordinator
+version: "1.0.0"
+description: >
+  A real-world clinical triage environment where an AI agent acts as an
+  emergency department triage coordinator. The agent assesses patients,
+  assigns priority levels, orders diagnostics, and manages bed allocation
+  under resource constraints.
+
+author: "Team Clinical Triage"
+license: MIT
+
+tasks:
+  - id: task_easy
+    name: "Single Patient Priority Assignment"
+    difficulty: easy
+    description: >
+      Assign the correct ESI triage priority (1-5) to a single patient
+      based on their vitals and chief complaint.
+    max_steps: 5
+    reward_threshold: 0.8
+
+  - id: task_medium
+    name: "Multi-Patient Queue Management"
+    difficulty: medium
+    description: >
+      Manage a queue of 5 patients simultaneously. Assign priorities,
+      order diagnostics, and optimize the treatment order under
+      time and resource constraints.
+    max_steps: 15
+    reward_threshold: 0.7
+
+  - id: task_hard
+    name: "Mass Casualty Incident Coordination"
+    difficulty: hard
+    description: >
+      Coordinate triage during a mass casualty incident with 10+ patients,
+      limited beds, critical resource shortages, and deteriorating patients
+      requiring re-triage decisions in real time.
+    max_steps: 30
+    reward_threshold: 0.6
+
+observation_space:
+  type: structured
+  fields:
+    - name: patients
+      type: list
+      description: List of patient objects with vitals and complaints
+    - name: available_beds
+      type: integer
+      description: Number of available beds in the ED
+    - name: resources
+      type: dict
+      description: Available diagnostic and treatment resources
+    - name: elapsed_time
+      type: integer
+      description: Simulated minutes elapsed in the episode
+
+action_space:
+  type: structured
+  fields:
+    - name: patient_id
+      type: string
+      description: ID of the patient to act on
+    - name: action_type
+      type: string
+      enum: [assign_priority, order_diagnostic, admit_patient, discharge_patient, reassess]
+    - name: value
+      type: string
+      description: The value for the action (e.g. priority level, diagnostic name)
+
+api:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+
+metadata:
+  tags: [healthcare, triage, resource-management, real-world]
+  language: python
+  framework: fastapi
