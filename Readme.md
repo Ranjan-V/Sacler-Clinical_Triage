@@ -143,8 +143,8 @@ pip install -e .
 ### 4. Set environment variables
 Create a `.env` file:
 ```env
-API_BASE_URL=https://api.openai.com/v1
-MODEL_NAME=gpt-4o-mini
+API_BASE_URL=[https://router.huggingface.co/v1]
+MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct:cerebras
 HF_TOKEN=your_huggingface_token
 ENV_URL=http://localhost:7860
 ```
