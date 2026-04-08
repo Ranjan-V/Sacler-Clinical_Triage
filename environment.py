@@ -307,7 +307,8 @@ class ClinicalTriageEnvironment:
 
     def _compute_final_score(self) -> float:
         if not self.state.patients:
-            return 0.0
+            return 0.01  # Clamped from 0.0
+        
         scores = []
         for p in self.state.patients:
             if p.current_priority == ESIPriority.UNASSIGNED:
@@ -315,7 +316,10 @@ class ClinicalTriageEnvironment:
             else:
                 diff = abs(int(p.current_priority.value) - int(p.correct_priority.value))
                 scores.append(max(0.0, 1.0 - diff * 0.3))
-        return round(sum(scores) / len(scores), 4)
+                
+        raw_score = sum(scores) / len(scores)
+        # Strictly enforce (0, 1) bounds
+        return round(max(0.01, min(0.99, float(raw_score))), 4)
 
     def _episode_summary(self) -> Dict:
         triaged = [p for p in self.state.patients if p.current_priority != ESIPriority.UNASSIGNED]
