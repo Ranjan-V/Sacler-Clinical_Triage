@@ -42,6 +42,7 @@ The agent can take the following actions at each step:
 ## 👁️ Observation Space
 
 Each observation contains:
+
 ```json
 {
   "task_id": "task_easy",
@@ -143,8 +144,8 @@ pip install -e .
 ### 4. Set environment variables
 Create a `.env` file:
 ```env
-API_BASE_URL=https://api.openai.com/v1
-MODEL_NAME=gpt-4o-mini
+API_BASE_URL=https://router.huggingface.co/v1
+MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct:cerebras
 HF_TOKEN=your_huggingface_token
 ENV_URL=http://localhost:7860
 ```
@@ -161,6 +162,7 @@ Visit `http://localhost:7860/docs` for the Swagger UI.
 ## 🤖 Run the Agent (inference.py)
 
 Make sure the server is running, then in a separate terminal:
+
 ```bash
 python inference.py
 ```
@@ -170,9 +172,14 @@ The script will run the agent through all 3 tasks and print structured logs.
 ---
 
 ## 🐳 Docker
+
 ```bash
 docker build -t clinical-triage .
-docker run -p 7860:7860 clinical-triage
+docker run -p 7860:7860 \
+  -e API_BASE_URL=https://router.huggingface.co/v1 \
+  -e MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct:cerebras \
+  -e HF_TOKEN=your_huggingface_token \
+  clinical-triage
 ```
 
 ---
@@ -181,22 +188,23 @@ docker run -p 7860:7860 clinical-triage
 
 | Variable | Description |
 |---|---|
-| `API_BASE_URL` | LLM API endpoint (e.g. OpenAI) |
-| `MODEL_NAME` | Model to use (e.g. `gpt-4o-mini`) |
-| `HF_TOKEN` | HuggingFace / OpenAI API key |
-| `ENV_URL` | URL where the environment is running |
+| `API_BASE_URL` | LLM API endpoint (e.g. `https://router.huggingface.co/v1`) |
+| `MODEL_NAME` | Model to use (e.g. `meta-llama/Llama-3.1-8B-Instruct:cerebras`) |
+| `HF_TOKEN` | HuggingFace token from huggingface.co/settings/tokens |
+| `ENV_URL` | URL where the environment is running (default: `http://localhost:7860`) |
 
 ---
 
 ## 📁 Project Structure
-clinical_triage/
-├── main.py            # FastAPI server
-├── environment.py     # Core triage logic
-├── models.py          # Pydantic typed models
-├── graders.py         # Task graders (easy/medium/hard)
-├── inference.py       # Agent inference script
-├── openenv.yaml       # OpenEnv config
-├── requirements.txt   # Dependencies
+.
+├── main.py            # FastAPI server (reset, step, state, grade endpoints)
+├── environment.py     # Core triage logic and episode management
+├── models.py          # Pydantic typed models (state, action, observation)
+├── graders.py         # Automated task graders (easy / medium / hard)
+├── inference.py       # Agent inference script with structured logs
+├── openenv.yaml       # OpenEnv environment config
+├── pyproject.toml     # Build system config for multi-mode deployment
+├── requirements.txt   # Python dependencies
 ├── setup.py           # Package setup
 ├── Dockerfile         # HuggingFace Spaces deployment
 └── README.md          # This file
