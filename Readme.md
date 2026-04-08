@@ -193,9 +193,9 @@ docker run -p 7860:7860 \
 | `HF_TOKEN` | HuggingFace token from huggingface.co/settings/tokens |
 | `ENV_URL` | URL where the environment is running (default: `http://localhost:7860`) |
 
----
-
 ## 📁 Project Structure
+
+```text
 .
 ├── main.py            # FastAPI server (reset, step, state, grade endpoints)
 ├── environment.py     # Core triage logic and episode management
@@ -208,9 +208,8 @@ docker run -p 7860:7860 \
 ├── setup.py           # Package setup
 ├── Dockerfile         # HuggingFace Spaces deployment
 └── README.md          # This file
-
----
+```
 
 ## 👥 Team
 
-Built for the Meta x Scaler OpenEnv Hackathon 2025.
+Built for the Meta x Scaler OpenEnv Hackathon 2026 by Ranjan V, Aaling Jileef Babu, Raj Singh.
