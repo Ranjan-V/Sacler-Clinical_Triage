@@ -1,26 +1,23 @@
 from typing import Dict, Any
-from models import ESIPriority
+
+
+def clamp(score: float) -> float:
+    """Ensure score is strictly between 0 and 1, never 0.0 or 1.0"""
+    return round(max(0.01, min(0.99, score)), 4)
 
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     """
     Easy: Single patient correctly triaged.
-    Score 0.0 - 1.0 based on priority accuracy.
+    Score strictly between 0.0 and 1.0.
     """
     patients = observation.get("patients", [])
     if not patients:
-        return 0.0
+        return 0.01
 
-    patient = patients[0]
-    current = patient.get("current_priority", "unassigned")
-
-    if current == "unassigned":
-        return 0.0
-
-    # We check via total_reward normalized
     total_reward = observation.get("total_reward", 0.0)
     max_possible = 1.0
-    return min(round(total_reward / max_possible, 4), 1.0)
+    return clamp(total_reward / max_possible)
 
 
 def grade_task_medium(observation: Dict[str, Any]) -> float:
@@ -32,7 +29,7 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
     """
     patients = observation.get("patients", [])
     if not patients:
-        return 0.0
+        return 0.01
 
     triaged = [p for p in patients if p.get("current_priority") != "unassigned"]
     triage_score = len(triaged) / len(patients)
@@ -47,7 +44,7 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
     admission_score = min(admitted_critical / max(1, len(patients) // 2), 1.0)
 
     final = (triage_score * 0.6) + (diagnostic_score * 0.2) + (admission_score * 0.2)
-    return round(final, 4)
+    return clamp(final)
 
 
 def grade_task_hard(observation: Dict[str, Any]) -> float:
@@ -59,7 +56,7 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
     """
     patients = observation.get("patients", [])
     if not patients:
-        return 0.0
+        return 0.01
 
     resources = observation.get("resources", {})
     total_resources = sum(resources.values()) if resources else 1
@@ -67,19 +64,17 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
     triaged = [p for p in patients if p.get("current_priority") != "unassigned"]
     triage_score = len(triaged) / len(patients)
 
-    # Resource usage score (reward using resources efficiently)
     initial_resources = {"xray": 3, "ecg": 5, "blood_test": 10, "ct_scan": 2, "ultrasound": 2}
     initial_total = sum(initial_resources.values())
     used = initial_total - total_resources
     resource_score = min(used / (initial_total * 0.5), 1.0)
 
-    # Bed management
     available_beds = observation.get("available_beds", 4)
     beds_used = 4 - available_beds
     bed_score = min(beds_used / 3, 1.0)
 
     final = (triage_score * 0.5) + (resource_score * 0.25) + (bed_score * 0.25)
-    return round(final, 4)
+    return clamp(final)
 
 
 def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
