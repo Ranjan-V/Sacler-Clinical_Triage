@@ -2,22 +2,23 @@ from typing import Dict, Any
 
 
 def clamp(score: float) -> float:
-    """Ensure score is strictly between 0 and 1, never 0.0 or 1.0"""
-    return round(max(0.01, min(0.99, score)), 4)
+    return round(max(0.01, min(0.99, float(score))), 4)
 
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
-    """
-    Easy: Single patient correctly triaged.
-    Score strictly between 0.0 and 1.0.
-    """
     patients = observation.get("patients", [])
     if not patients:
         return 0.01
 
+    patient = patients[0]
+    current = patient.get("current_priority", "unassigned")
+    if current == "unassigned":
+        return 0.01
+
     total_reward = observation.get("total_reward", 0.0)
-    max_possible = 1.0
-    return clamp(total_reward / max_possible)
+    # Normalize against max possible (1.0) but clamp strictly
+    score = total_reward / 1.0
+    return clamp(score)
 
 
 def grade_task_medium(observation: Dict[str, Any]) -> float:

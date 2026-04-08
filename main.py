@@ -84,6 +84,8 @@ def grade() -> Dict[str, Any]:
         current_state = env.get_state()
         task_id = current_state.get("task_id", "task_easy")
         score = run_grader(task_id, current_state)
+        # Strictly enforce (0, 1) — never 0.0 or 1.0
+        score = round(max(0.01, min(0.99, float(score))), 4)
         return {
             "task_id": task_id,
             "score": score,
