@@ -19,15 +19,21 @@ TASKS = ["task_easy", "task_medium", "task_hard"]
 
 def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
     url = f"{ENV_URL}{endpoint}"
-    with httpx.Client(timeout=60) as http:
-        if method == "POST":
-            r = http.post(url, json=payload or {})
-        else:
-            r = http.get(url)
-        if not r.is_success:
-            print(f"[DEBUG] {r.status_code} error on {endpoint}: {r.text}", flush=True)
-            return {"error": r.text, "reward": 0.0, "done": False, "observation": {}}
-        return r.json()
+    try:
+        with httpx.Client(timeout=60) as http:
+            if method == "POST":
+                r = http.post(url, json=payload or {})
+            else:
+                r = http.get(url)
+            if not r.is_success:
+                print(f"[DEBUG] {r.status_code} error on {endpoint}: {r.text}", flush=True)
+                # "observation" intentionally OMITTED so reset/step error checks fire correctly
+                return {"error": r.text, "reward": 0.0, "done": False}
+            return r.json()
+    except Exception as e:
+        # Catches all network-level errors: ConnectError, ReadTimeout, TimeoutException, etc.
+        print(f"[DEBUG] network exception on {endpoint}: {e}", flush=True)
+        return {"error": str(e), "reward": 0.0, "done": False}
 
 
 def build_prompt(observation: dict, action_history: list) -> str:
@@ -130,13 +136,32 @@ def get_agent_action(observation: dict, action_history: list) -> dict:
 
 
 def run_task(task_id: str) -> dict:
+    """Wrapper that guarantees run_task never crashes the process."""
     print(f"[START] task_id={task_id} timestamp={time.time()}", flush=True)
+    try:
+        return _run_task_inner(task_id)
+    except Exception as e:
+        # Last-resort catch: even if something unexpected bubbles up,
+        # we still emit a valid [END] line and return a safe score.
+        print(
+            f"[END] task_id={task_id} episode_id=error total_steps=0"
+            f" total_reward=0.0 final_score=0.01 exception={e}",
+            flush=True
+        )
+        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
 
+
+def _run_task_inner(task_id: str) -> dict:
     # Reset environment
     reset_response = call_env("POST", "/reset", {"task_id": task_id})
-    if "error" in reset_response and "observation" not in reset_response:
-        print(f"[END] task_id={task_id} episode_id=error total_steps=0 total_reward=0.0 final_score=0.0", flush=True)
-        return {"task_id": task_id, "final_score": 0.0, "total_reward": 0.0}
+    # call_env no longer includes "observation" in error dicts, so "error" alone is the right check
+    if "error" in reset_response:
+        print(
+            f"[END] task_id={task_id} episode_id=error total_steps=0"
+            f" total_reward=0.0 final_score=0.01",
+            flush=True
+        )
+        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
 
     observation = reset_response.get("observation", {})
     episode_id = reset_response.get("episode_id", "unknown")
@@ -164,7 +189,9 @@ def run_task(task_id: str) -> dict:
 
         step_result = call_env("POST", "/step", action)
 
-        if "error" in step_result and not step_result.get("observation"):
+        # call_env now never includes "observation" in error dicts,
+        # so checking "error" key alone is sufficient and correct
+        if "error" in step_result:
             print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.0", flush=True)
             break
 
@@ -185,7 +212,9 @@ def run_task(task_id: str) -> dict:
 
     # Get final grade
     grade_result = call_env("POST", "/grade")
-    final_score = grade_result.get("score", 0.0)
+    final_score = grade_result.get("score", 0.01)
+    # Safety clamp: must be strictly in (0, 1) — never 0.0 or 1.0
+    final_score = round(max(0.01, min(0.99, float(final_score))), 4)
 
     print(
         f"[END] task_id={task_id} episode_id={episode_id}"
@@ -204,7 +233,12 @@ def run_task(task_id: str) -> dict:
 def main():
     results = []
     for task_id in TASKS:
-        result = run_task(task_id)
+        try:
+            result = run_task(task_id)
+        except Exception as e:
+            # Should never reach here given run_task's own guard, but belt-and-suspenders
+            print(f"[ERROR] task_id={task_id} unhandled={e}", flush=True)
+            result = {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
         results.append(result)
         time.sleep(2)
 
