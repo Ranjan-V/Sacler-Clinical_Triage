@@ -158,7 +158,7 @@ class ClinicalTriageEnvironment:
         if self.state.done:
             return StepResult(
                 observation=self._get_observation(),
-                reward=0.0,
+                reward=0.01,
                 done=True,
                 info={"message": "Episode already done"}
             )
@@ -181,7 +181,7 @@ class ClinicalTriageEnvironment:
 
         return StepResult(
             observation=self._get_observation(),
-            reward=round(reward, 4),
+            reward=round(max(0.01, min(0.99, reward)), 4),
             done=self.state.done,
             info=info
         )
