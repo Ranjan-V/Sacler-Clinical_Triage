@@ -1,11 +1,6 @@
 from typing import Dict, Any
 
 
-def clamp(score: float) -> float:
-    """Strictly clamp to open interval (0, 1) — never 0.0 or 1.0."""
-    return round(max(0.01, min(0.99, float(score))), 4)
-
-
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     patients = observation.get("patients", [])
     if not patients:
@@ -24,17 +19,15 @@ def grade_task_easy(observation: Dict[str, Any]) -> float:
     except (ValueError, TypeError):
         return 0.01
 
-    # We don't have correct_priority in observation, so use total_reward as proxy
+    # Use total_reward as proxy, bounded natively to (0.01, 0.99).
     total_reward = observation.get("total_reward", 0.0)
+    score = max(0.01, min(0.99, float(total_reward)))
 
-    # Normalize: max single-patient reward is ~1.0 for priority alone
-    # Cap normalizer at 1.0 to avoid scores > 0.99 after clamp
-    score = min(total_reward, 1.0) / 1.0
-
-    # Ensure we never return exactly 0.0 if patient was triaged
+    # Ensure a baseline score when the patient was actually triaged
     score = max(score, 0.05)
 
-    return clamp(score)
+    # score is in [0.05, 0.99] — strictly inside (0, 1)
+    return round(score, 4)
 
 
 def grade_task_medium(observation: Dict[str, Any]) -> float:
@@ -51,25 +44,24 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
     n = len(patients)
 
     triaged = [p for p in patients if p.get("current_priority") not in ("unassigned", None, "")]
-    triage_score = len(triaged) / n if n > 0 else 0.0
+    # Each sub-score is bounded natively to [0.01, 0.99] so the weighted sum
+    # is always in [0.01, 0.99] — strictly inside (0, 1) — with no clamp needed.
+    triage_score = max(0.01, min(0.99, len(triaged) / n))
 
     has_diagnostics = [p for p in patients if p.get("diagnostics_ordered")]
-    diagnostic_score = len(has_diagnostics) / n if n > 0 else 0.0
+    diagnostic_score = max(0.01, min(0.99, len(has_diagnostics) / n))
 
     admitted_critical = sum(
         1 for p in patients
         if p.get("admitted") and p.get("current_priority") in ("1", "2")
     )
     denom = max(1, n // 2)
-    admission_score = min(admitted_critical / denom, 0.99)
+    admission_score = max(0.01, min(0.99, admitted_critical / denom))
 
+    # Weighted sum: min = 0.01*(0.6+0.2+0.2) = 0.01, max = 0.99
     final = (triage_score * 0.6) + (diagnostic_score * 0.2) + (admission_score * 0.2)
 
-    # Ensure strictly > 0 when any work has been done
-    if len(triaged) > 0 or has_diagnostics:
-        final = max(final, 0.05)
-
-    return clamp(final)
+    return round(final, 4)
 
 
 def grade_task_hard(observation: Dict[str, Any]) -> float:
@@ -88,27 +80,23 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
     total_resources = sum(resources.values()) if resources else 0
 
     triaged = [p for p in patients if p.get("current_priority") not in ("unassigned", None, "")]
-    triage_score = len(triaged) / n if n > 0 else 0.0
+    triage_score = max(0.01, min(0.99, len(triaged) / n))
 
     initial_resources = {"xray": 3, "ecg": 5, "blood_test": 10, "ct_scan": 2, "ultrasound": 2}
     initial_total = sum(initial_resources.values())  # = 22
     used = initial_total - total_resources
-    # Avoid dividing by zero; target 50% usage = good
-    resource_score = min(max(used, 0) / (initial_total * 0.5), 0.99)
+    resource_score = max(0.01, min(0.99, max(used, 0) / (initial_total * 0.5)))
 
     # task_hard starts with 4 beds
     initial_beds = 4
     available_beds = observation.get("available_beds", initial_beds)
     beds_used = max(initial_beds - available_beds, 0)
-    bed_score = min(beds_used / max(initial_beds - 1, 1), 0.99)
+    bed_score = max(0.01, min(0.99, beds_used / max(initial_beds - 1, 1)))
 
+    # Weighted sum: min = 0.01*(0.5+0.25+0.25) = 0.01, max = 0.99
     final = (triage_score * 0.5) + (resource_score * 0.25) + (bed_score * 0.25)
 
-    # Ensure strictly > 0 when any work has been done
-    if triaged:
-        final = max(final, 0.05)
-
-    return clamp(final)
+    return round(final, 4)
 
 
 def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
@@ -121,6 +109,5 @@ def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
     grader = graders.get(task_id)
     if grader is None:
         raise ValueError(f"Unknown task_id: {task_id}")
-    score = grader(observation)
-    # Final safety net — belt and suspenders
-    return clamp(score)
+    # Every grader returns a value strictly inside (0, 1) by construction.
+    return grader(observation)
