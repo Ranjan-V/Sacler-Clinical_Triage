@@ -16,6 +16,16 @@ client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "sk-placeholder")
 
 TASKS = ["task_easy", "task_medium", "task_hard"]
 
+# Maximum reward achievable per step (used to normalise the running total)
+MAX_STEP_REWARD = 0.99
+
+
+def _norm(value: float, max_possible: float) -> float:
+    """Normalise an accumulated reward into the strictly-open interval (0.01, 0.99)."""
+    if max_possible <= 0:
+        return 0.01
+    return round(max(0.01, min(0.99, float(value) / float(max_possible))), 4)
+
 
 def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
     url = f"{ENV_URL}{endpoint}"
@@ -27,11 +37,9 @@ def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
                 r = http.get(url)
             if not r.is_success:
                 print(f"[DEBUG] {r.status_code} error on {endpoint}: {r.text}", flush=True)
-                # "observation" intentionally OMITTED so reset/step error checks fire correctly
                 return {"error": r.text, "reward": 0.01, "done": False}
             return r.json()
     except Exception as e:
-        # Catches all network-level errors: ConnectError, ReadTimeout, TimeoutException, etc.
         print(f"[DEBUG] network exception on {endpoint}: {e}", flush=True)
         return {"error": str(e), "reward": 0.01, "done": False}
 
@@ -141,36 +149,37 @@ def run_task(task_id: str) -> dict:
     try:
         return _run_task_inner(task_id)
     except Exception as e:
-        # Last-resort catch: even if something unexpected bubbles up,
-        # we still emit a valid [END] line and return a safe score.
         print(
             f"[END] task_id={task_id} episode_id=error total_steps=0"
-            f" total_reward=0.0 final_score=0.01 exception={e}",
+            f" total_reward=0.01 final_score=0.01 exception={e}",
             flush=True
         )
-        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
+        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.01}
 
 
 def _run_task_inner(task_id: str) -> dict:
     # Reset environment
     reset_response = call_env("POST", "/reset", {"task_id": task_id})
-    # call_env no longer includes "observation" in error dicts, so "error" alone is the right check
     if "error" in reset_response:
         print(
             f"[END] task_id={task_id} episode_id=error total_steps=0"
-            f" total_reward=0.0 final_score=0.01",
+            f" total_reward=0.01 final_score=0.01",
             flush=True
         )
-        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
+        return {"task_id": task_id, "final_score": 0.01, "total_reward": 0.01}
 
     observation = reset_response.get("observation", {})
     episode_id = reset_response.get("episode_id", "unknown")
 
-    total_reward = 0.0
+    # max_possible_reward: theoretical ceiling for the entire episode.
+    # Used to normalise running totals into (0.01, 0.99) for every log field.
+    max_steps = observation.get("max_steps", 10)
+    max_possible_reward = max_steps * MAX_STEP_REWARD  # e.g. 5×0.99=4.95
+
+    raw_total = 0.0      # raw accumulator — never printed directly
     step_num = 0
     done = False
     action_history = []
-    max_steps = observation.get("max_steps", 10)
 
     while not done and step_num < max_steps:
         patients = observation.get("patients", [])
@@ -184,39 +193,46 @@ def _run_task_inner(task_id: str) -> dict:
             action = get_agent_action(observation, action_history)
             action_history.append(action)
         except Exception as e:
-            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={str(e)} reward=0.0", flush=True)
+            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={str(e)} reward=0.01", flush=True)
             break
 
         step_result = call_env("POST", "/step", action)
 
-        # call_env now never includes "observation" in error dicts,
-        # so checking "error" key alone is sufficient and correct
         if "error" in step_result:
-            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.0", flush=True)
+            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.01", flush=True)
             break
 
-        reward = step_result.get("reward", 0.0)
+        # Individual step reward — environment.py guarantees (0.01, 0.99)
+        reward = step_result.get("reward", 0.01)
+        reward = round(max(0.01, min(0.99, float(reward))), 4)  # extra safety
         done = step_result.get("done", False)
         new_obs = step_result.get("observation", {})
         if new_obs:
             observation = new_obs
-        total_reward += reward
+        raw_total += reward
         step_num += 1
 
+        # Normalise running total into (0.01, 0.99) for the log
+        norm_total = _norm(raw_total, max_possible_reward)
         print(
             f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num}"
             f" action={json.dumps(action)} reward={reward}"
-            f" total_reward={round(total_reward, 4)} done={done}",
+            f" total_reward={norm_total} done={done}",
             flush=True
         )
 
-    # Get final grade — graders already return values strictly inside (0, 1) by construction
+    # Get final grade — graders return values strictly inside (0, 1) by construction
     grade_result = call_env("POST", "/grade")
     final_score = grade_result.get("score", 0.01)
+    # Clamp defensively in case the external API returns an unexpected value
+    final_score = round(max(0.01, min(0.99, float(final_score))), 4)
+
+    # Normalise accumulated total into (0.01, 0.99) — never print raw totals > 1
+    norm_total = _norm(raw_total if raw_total > 0 else 0.01, max_possible_reward)
 
     print(
         f"[END] task_id={task_id} episode_id={episode_id}"
-        f" total_steps={step_num} total_reward={round(total_reward, 4)}"
+        f" total_steps={step_num} total_reward={norm_total}"
         f" final_score={final_score}",
         flush=True
     )
@@ -224,7 +240,7 @@ def _run_task_inner(task_id: str) -> dict:
     return {
         "task_id": task_id,
         "final_score": final_score,
-        "total_reward": round(total_reward, 4)
+        "total_reward": norm_total,  # normalised — always strictly in (0.01, 0.99)
     }
 
 
@@ -234,9 +250,8 @@ def main():
         try:
             result = run_task(task_id)
         except Exception as e:
-            # Should never reach here given run_task's own guard, but belt-and-suspenders
             print(f"[ERROR] task_id={task_id} unhandled={e}", flush=True)
-            result = {"task_id": task_id, "final_score": 0.01, "total_reward": 0.0}
+            result = {"task_id": task_id, "final_score": 0.01, "total_reward": 0.01}
         results.append(result)
         time.sleep(2)
 
