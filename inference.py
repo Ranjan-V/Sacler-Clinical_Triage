@@ -28,12 +28,12 @@ def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
             if not r.is_success:
                 print(f"[DEBUG] {r.status_code} error on {endpoint}: {r.text}", flush=True)
                 # "observation" intentionally OMITTED so reset/step error checks fire correctly
-                return {"error": r.text, "reward": 0.0, "done": False}
+                return {"error": r.text, "reward": 0.01, "done": False}
             return r.json()
     except Exception as e:
         # Catches all network-level errors: ConnectError, ReadTimeout, TimeoutException, etc.
         print(f"[DEBUG] network exception on {endpoint}: {e}", flush=True)
-        return {"error": str(e), "reward": 0.0, "done": False}
+        return {"error": str(e), "reward": 0.01, "done": False}
 
 
 def build_prompt(observation: dict, action_history: list) -> str:
@@ -210,11 +210,9 @@ def _run_task_inner(task_id: str) -> dict:
             flush=True
         )
 
-    # Get final grade
+    # Get final grade — graders already return values strictly inside (0, 1) by construction
     grade_result = call_env("POST", "/grade")
     final_score = grade_result.get("score", 0.01)
-    # Safety clamp: must be strictly in (0, 1) — never 0.0 or 1.0
-    final_score = round(max(0.01, min(0.99, float(final_score))), 4)
 
     print(
         f"[END] task_id={task_id} episode_id={episode_id}"
