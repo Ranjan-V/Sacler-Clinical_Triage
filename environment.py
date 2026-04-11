@@ -181,7 +181,7 @@ class ClinicalTriageEnvironment:
 
         return StepResult(
             observation=self._get_observation(),
-            reward=round(max(0.01, min(0.99, reward)), 4),
+            reward=round(reward, 4),
             done=self.state.done,
             info=info
         )
@@ -189,9 +189,10 @@ class ClinicalTriageEnvironment:
     def _apply_action(self, action: Action) -> Tuple[float, Dict]:
         patient = self._get_patient(action.patient_id)
         if patient is None:
-            return -0.1, {"error": f"Patient {action.patient_id} not found"}
+            # Unknown patient — small positive penalty proxy
+            return 0.01, {"error": f"Patient {action.patient_id} not found"}
 
-        reward = 0.0
+        reward = 0.02
         info = {"action": action.action_type, "patient_id": action.patient_id}
 
         if action.action_type == ActionType.ASSIGN_PRIORITY:
@@ -216,80 +217,92 @@ class ClinicalTriageEnvironment:
         try:
             assigned = ESIPriority(value)
         except ValueError:
-            return -0.1, {**info, "error": f"Invalid priority value: {value}"}
+            # Invalid priority value — small positive proxy
+            return 0.01, {**info, "error": f"Invalid priority value: {value}"}
 
         if patient.current_priority != ESIPriority.UNASSIGNED:
-            return -0.05, {**info, "message": "Priority already assigned"}
+            # Priority already assigned — minimal positive proxy
+            return 0.02, {**info, "message": "Priority already assigned"}
 
         correct = patient.correct_priority
         patient.current_priority = assigned
 
-        # Partial reward based on closeness
+        # Partial reward based on closeness — all values strictly in (0, 1)
         diff = abs(int(assigned.value) - int(correct.value))
         if diff == 0:
-            reward = 1.0
+            reward = 0.99   # perfect match (was 1.0)
         elif diff == 1:
-            reward = 0.6
+            reward = 0.60
         elif diff == 2:
-            reward = 0.3
+            reward = 0.30
         else:
-            reward = 0.0
+            reward = 0.05   # far off but not zero (was 0.0)
 
-        # Bonus: penalize under-triaging critical patients
+        # Penalise under-triaging critical patients: subtract but floor at 0.01
         if int(correct.value) <= 2 and int(assigned.value) >= 4:
-            reward -= 0.3
+            reward = max(reward - 0.30, 0.01)
 
         info["correct_priority"] = correct.value
         info["assigned_priority"] = assigned.value
         info["priority_reward"] = reward
-        return max(reward, 0.0), info
+        return reward, info
 
     def _handle_diagnostic(self, patient: Patient, value: str, info: Dict) -> Tuple[float, Dict]:
         if value not in VALID_DIAGNOSTICS:
-            return -0.1, {**info, "error": f"Unknown diagnostic: {value}"}
+            # Unknown diagnostic — small positive proxy
+            return 0.01, {**info, "error": f"Unknown diagnostic: {value}"}
 
         resource = getattr(self.state.resources, value, 0)
         if resource <= 0:
-            return -0.1, {**info, "error": f"No {value} available"}
+            # No resource available — small positive proxy
+            return 0.01, {**info, "error": f"No {value} available"}
 
         if value in patient.diagnostics_ordered:
-            return -0.05, {**info, "message": "Diagnostic already ordered"}
+            # Duplicate order — minimal positive proxy
+            return 0.02, {**info, "message": "Diagnostic already ordered"}
 
         patient.diagnostics_ordered.append(value)
         setattr(self.state.resources, value, resource - 1)
 
         # Reward based on clinical appropriateness
         appropriate = self._is_appropriate_diagnostic(patient, value)
-        reward = 0.3 if appropriate else 0.1
+        reward = 0.30 if appropriate else 0.10
         info["diagnostic"] = value
         info["appropriate"] = appropriate
         return reward, info
 
     def _handle_admit(self, patient: Patient, info: Dict) -> Tuple[float, Dict]:
         if self.state.available_beds <= 0:
-            return -0.1, {**info, "error": "No beds available"}
+            # No beds — small positive proxy
+            return 0.01, {**info, "error": "No beds available"}
         if patient.admitted:
-            return -0.05, {**info, "message": "Already admitted"}
+            # Already admitted — minimal positive proxy
+            return 0.02, {**info, "message": "Already admitted"}
 
         patient.admitted = True
         self.state.available_beds -= 1
 
         # Reward admitting high-priority patients
-        priority_val = int(patient.current_priority.value) if patient.current_priority != ESIPriority.UNASSIGNED else 5
-        reward = 0.4 if priority_val <= 2 else 0.2
+        priority_val = (
+            int(patient.current_priority.value)
+            if patient.current_priority != ESIPriority.UNASSIGNED
+            else 5
+        )
+        reward = 0.40 if priority_val <= 2 else 0.20
         info["beds_remaining"] = self.state.available_beds
         return reward, info
 
     def _handle_discharge(self, patient: Patient, info: Dict) -> Tuple[float, Dict]:
         if patient.discharged:
-            return -0.05, {**info, "message": "Already discharged"}
+            # Already discharged — minimal positive proxy
+            return 0.02, {**info, "message": "Already discharged"}
 
         priority_val = int(patient.correct_priority.value)
         if priority_val >= 4:
             patient.discharged = True
-            reward = 0.3
+            reward = 0.30   # appropriate discharge
         else:
-            reward = -0.2  # discharging critical patients
+            reward = 0.01   # discharging critical patient — minimal positive proxy (was -0.2)
         info["discharge_appropriate"] = priority_val >= 4
         return reward, info
 
@@ -307,19 +320,22 @@ class ClinicalTriageEnvironment:
 
     def _compute_final_score(self) -> float:
         if not self.state.patients:
-            return 0.01  # Clamped from 0.0
-        
+            return 0.01
+
         scores = []
         for p in self.state.patients:
             if p.current_priority == ESIPriority.UNASSIGNED:
-                scores.append(0.0)
+                # Unassigned — minimum positive score (was 0.0)
+                scores.append(0.01)
             else:
                 diff = abs(int(p.current_priority.value) - int(p.correct_priority.value))
-                scores.append(max(0.0, 1.0 - diff * 0.3))
-                
+                # diff=0 → 0.99, diff=1 → 0.69, diff=2 → 0.39, diff≥3 → 0.01
+                raw = 1.0 - diff * 0.30
+                scores.append(max(0.01, min(0.99, raw)))
+
         raw_score = sum(scores) / len(scores)
-        # Strictly enforce (0, 1) bounds
-        return round(max(0.01, min(0.99, float(raw_score))), 4)
+        # raw_score is naturally in [0.01, 0.99] — no end-of-function clamp needed
+        return round(float(raw_score), 4)
 
     def _episode_summary(self) -> Dict:
         triaged = [p for p in self.state.patients if p.current_priority != ESIPriority.UNASSIGNED]
