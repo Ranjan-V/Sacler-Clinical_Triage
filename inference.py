@@ -2,7 +2,6 @@ import os
 import json
 import time
 import httpx
-from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,9 +9,14 @@ load_dotenv()
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct:cerebras")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-ENV_URL = os.environ.get("ENV_URL", "https://showraiser2805-clinical-triage-openenv.hf.space")
+ENV_URL = os.environ.get("ENV_URL", "http://127.0.0.1:7860")
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "sk-placeholder")
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
+
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN or "sk-placeholder") if OpenAI and HF_TOKEN else None
 
 TASKS = ["task_easy", "task_medium", "task_hard"]
 
@@ -93,21 +97,92 @@ Respond ONLY with this exact JSON format:
 {{"patient_id": "P001", "action_type": "assign_priority", "value": "1"}}"""
 
 
+def estimate_priority(patient: dict) -> str:
+    complaint = str(patient.get("chief_complaint", "")).lower()
+    vitals = patient.get("vitals", {})
+    hr = float(vitals.get("heart_rate", 80))
+    sbp = float(vitals.get("blood_pressure_systolic", 120))
+    rr = float(vitals.get("respiratory_rate", 16))
+    spo2 = float(vitals.get("oxygen_saturation", 98))
+    temp = float(vitals.get("temperature", 37))
+    pain = float(vitals.get("pain_score", 0))
+
+    if (
+        spo2 <= 90 or sbp <= 90 or rr >= 30 or rr <= 8 or hr >= 140 or hr <= 50
+        or "unresponsive" in complaint or "altered mental" in complaint
+        or "sepsis" in complaint or "worst of life" in complaint
+    ):
+        return "1"
+
+    if (
+        spo2 <= 94 or sbp <= 100 or rr >= 24 or hr >= 115 or temp >= 39
+        or "chest pain" in complaint or "difficulty breathing" in complaint
+        or "palpitations" in complaint or "confusion" in complaint
+    ):
+        return "2"
+
+    if pain >= 7 or "abdominal pain" in complaint or "vomiting" in complaint:
+        return "3"
+
+    if "laceration" in complaint or "ankle sprain" in complaint or pain >= 4:
+        return "4"
+
+    return "5"
+
+
+def heuristic_action(observation: dict) -> dict:
+    patients = observation.get("patients", [])
+    unassigned = [p for p in patients if p.get("current_priority") == "unassigned"]
+
+    if unassigned:
+        ranked = sorted(unassigned, key=lambda p: int(estimate_priority(p)))
+        patient = ranked[0]
+        return {
+            "patient_id": patient["patient_id"],
+            "action_type": "assign_priority",
+            "value": estimate_priority(patient),
+        }
+
+    admitted_candidates = [
+        p for p in patients
+        if not p.get("admitted") and str(p.get("current_priority")) in ("1", "2")
+    ]
+    if admitted_candidates:
+        patient = admitted_candidates[0]
+        return {
+            "patient_id": patient["patient_id"],
+            "action_type": "admit_patient",
+            "value": "admit",
+        }
+
+    return {
+        "patient_id": patients[0]["patient_id"] if patients else "P001",
+        "action_type": "reassess",
+        "value": "reassess",
+    }
+
+
 def get_agent_action(observation: dict, action_history: list) -> dict:
+    if client is None:
+        return heuristic_action(observation)
+
     prompt = build_prompt(observation, action_history)
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-        max_tokens=80,
-    )
-    content = response.choices[0].message.content.strip()
-    content = content.replace("```json", "").replace("```", "").strip()
-    start = content.find("{")
-    end = content.rfind("}") + 1
-    if start != -1 and end > start:
-        content = content[start:end]
-    action = json.loads(content)
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=80,
+        )
+        content = response.choices[0].message.content.strip()
+        content = content.replace("```json", "").replace("```", "").strip()
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start != -1 and end > start:
+            content = content[start:end]
+        action = json.loads(content)
+    except Exception:
+        return heuristic_action(observation)
 
     valid_types = ["assign_priority", "order_diagnostic", "admit_patient", "discharge_patient", "reassess"]
     if action.get("action_type") not in valid_types:
