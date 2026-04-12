@@ -1,40 +1,44 @@
+import math
 from typing import Dict, Any
 
 def enforce_bounds(val: Any) -> float:
-    """Airtight boundary enforcer to guarantee strictly (0, 1) scores."""
+    """Airtight boundary enforcer. Uses 0.05 to 0.95 to defeat math.isclose() float rounding traps."""
     try:
-        return float(max(0.01, min(0.99, round(float(val), 4))))
-    except (ValueError, TypeError):
-        return 0.01
+        v = float(val)
+        if math.isnan(v) or math.isinf(v):
+            return 0.05
+        return float(max(0.05, min(0.95, round(v, 4))))
+    except Exception:
+        return 0.05
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     try:
         patients = observation.get("patients", [])
         if not patients:
-            return 0.01
+            return 0.05
 
         patient = patients[0]
         current = patient.get("current_priority", "unassigned")
 
         if str(current).lower() == "unassigned":
-            return 0.01
+            return 0.05
 
-        total_reward = observation.get("total_reward", 0.01)
+        total_reward = observation.get("total_reward", 0.05)
         score = max(0.05, float(total_reward))
         
         return enforce_bounds(score)
     except Exception:
-        return 0.01
+        return 0.05
 
 def grade_task_medium(observation: Dict[str, Any]) -> float:
     try:
         patients = observation.get("patients", [])
         if not patients:
-            return 0.01
+            return 0.05
 
         n = len(patients)
         if n == 0:
-            return 0.01
+            return 0.05
 
         triaged = [p for p in patients if str(p.get("current_priority", "unassigned")).lower() not in ("unassigned", "none", "")]
         triage_score = len(triaged) / n
@@ -52,17 +56,17 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
         final = (triage_score * 0.6) + (diagnostic_score * 0.2) + (admission_score * 0.2)
         return enforce_bounds(final)
     except Exception:
-        return 0.01
+        return 0.05
 
 def grade_task_hard(observation: Dict[str, Any]) -> float:
     try:
         patients = observation.get("patients", [])
         if not patients:
-            return 0.01
+            return 0.05
 
         n = len(patients)
         if n == 0:
-            return 0.01
+            return 0.05
 
         resources = observation.get("resources", {})
         total_resources = sum(resources.values()) if isinstance(resources, dict) else 0
@@ -87,7 +91,7 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
         final = (triage_score * 0.5) + (resource_score * 0.25) + (bed_score * 0.25)
         return enforce_bounds(final)
     except Exception:
-        return 0.01
+        return 0.05
 
 def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
     """Route to correct grader safely without crashing on fake tasks."""
@@ -98,10 +102,9 @@ def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
             "task_hard": grade_task_hard,
         }
         
-        # If validator feeds a fake task, return 0.01 instead of raising ValueError
         if task_id not in graders:
-            return 0.01 
+            return 0.05 
             
         return enforce_bounds(graders[task_id](observation))
     except Exception:
-        return 0.01
+        return 0.05
