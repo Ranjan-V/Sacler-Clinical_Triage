@@ -337,7 +337,7 @@ class ClinicalTriageEnvironment:
             "triaged": len(triaged),
             "admitted": sum(1 for p in self.state.patients if p.admitted),
             "total_steps": self.state.step_count,
-            "total_reward": round(self.state.total_reward, 4),
+            "total_reward": round(max(0.02, min(0.98, self.state.total_reward / max(self.state.max_steps, 1))), 4),
         }
 
     def _get_patient(self, patient_id: str):
