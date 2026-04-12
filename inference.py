@@ -23,9 +23,9 @@ TASKS = ["task_easy", "task_medium", "task_hard"]
 
 def safe_score(val) -> float:
     try:
-        return round(max(0.02, min(0.98, float(val))), 4)
+        return round(max(0.1, min(0.9, float(val))), 2)
     except:
-        return 0.02
+        return 0.1
 
 
 def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
@@ -35,11 +35,11 @@ def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
             r = http.post(url, json=payload or {}) if method == "POST" else http.get(url)
             if not r.is_success:
                 print(f"[DEBUG] {r.status_code} error on {endpoint}: {r.text}", flush=True)
-                return {"error": r.text, "reward": 0.02, "done": False}
+                return {"error": r.text, "reward": 0.1, "done": False}
             return r.json()
     except Exception as e:
         print(f"[DEBUG] network exception on {endpoint}: {e}", flush=True)
-        return {"error": str(e), "reward": 0.02, "done": False}
+        return {"error": str(e), "reward": 0.1, "done": False}
 
 
 def build_prompt(observation: dict, action_history: list) -> str:
@@ -208,14 +208,14 @@ def run_task(task_id: str) -> dict:
         return _run_task_inner(task_id)
     except Exception as e:
         print(f"[END] task_id={task_id} episode_id=error total_steps=0 total_reward=0.02 final_score=0.02", flush=True)
-        return {"task_id": task_id, "final_score": 0.02, "total_reward": 0.02}
+        return {"task_id": task_id, "score": 0.1, "total_reward": 0.1}
 
 
 def _run_task_inner(task_id: str) -> dict:
     reset_response = call_env("POST", "/reset", {"task_id": task_id})
     if "error" in reset_response:
         print(f"[END] task_id={task_id} episode_id=error total_steps=0 total_reward=0.02 final_score=0.02", flush=True)
-        return {"task_id": task_id, "final_score": 0.02, "total_reward": 0.02}
+        return {"task_id": task_id, "score": 0.1, "total_reward": 0.1}
 
     observation = reset_response.get("observation", {})
     episode_id = reset_response.get("episode_id", "unknown")
@@ -236,15 +236,15 @@ def _run_task_inner(task_id: str) -> dict:
             action = get_agent_action(observation, action_history)
             action_history.append(action)
         except Exception as e:
-            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={str(e)} reward=0.02", flush=True)
+            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={str(e)} reward=0.1", flush=True)
             break
 
         step_result = call_env("POST", "/step", action)
         if "error" in step_result:
-            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.02", flush=True)
+            print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.1", flush=True)
             break
 
-        reward = safe_score(step_result.get("reward", 0.02))
+        reward = safe_score(step_result.get("reward", 0.1))
         done = step_result.get("done", False)
         new_obs = step_result.get("observation", {})
         if new_obs:
@@ -260,7 +260,7 @@ def _run_task_inner(task_id: str) -> dict:
         )
 
     grade_result = call_env("POST", "/grade")
-    final_score = safe_score(grade_result.get("score", 0.02))
+    final_score = safe_score(grade_result.get("score", 0.1))
     total_reward = safe_score(raw_total / max(step_num, 1))
 
     print(
@@ -270,7 +270,7 @@ def _run_task_inner(task_id: str) -> dict:
         flush=True
     )
 
-    return {"task_id": task_id, "final_score": final_score, "total_reward": total_reward}
+    return {"task_id": task_id, "score": final_score, "total_reward": total_reward}
 
 
 def main():
@@ -280,14 +280,14 @@ def main():
             result = run_task(task_id)
         except Exception as e:
             print(f"[ERROR] task_id={task_id} unhandled={e}", flush=True)
-            result = {"task_id": task_id, "final_score": 0.02, "total_reward": 0.02}
+            result = {"task_id": task_id, "score": 0.1, "total_reward": 0.1}
         results.append(result)
         time.sleep(2)
 
     try:
         avg = safe_score(sum(r["final_score"] for r in results) / len(results))
     except:
-        avg = 0.02
+        avg = 0.1
 
     print(f"[SUMMARY] results={json.dumps(results)} average_score={avg}", flush=True)
 
