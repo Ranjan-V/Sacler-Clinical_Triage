@@ -233,16 +233,19 @@ def _run_task_inner(task_id: str) -> dict:
     # Get final grade
     grade_result = call_env("POST", "/grade")
     
-    # Safely parse and clamp final score
     try:
         raw_final_score = float(grade_result.get("score", 0.01))
     except (ValueError, TypeError):
         raw_final_score = 0.01
-        
-    final_score = float(max(0.01, min(0.99, round(raw_final_score, 4))))
 
-    # Normalise accumulated total
-    norm_total = _norm(raw_total if raw_total > 0 else 0.01, max_possible_reward)
+    # AIRTIGHT clamp - never 0.0 or 1.0 under any circumstance
+    final_score = round(max(0.01, min(0.98, raw_final_score)), 4)
+
+    # Normalise accumulated total - also never 0.0 or 1.0
+    if raw_total <= 0:
+        norm_total = 0.01
+    else:
+        norm_total = round(max(0.01, min(0.98, raw_total / max(max_possible_reward, 0.01))), 4)
 
     print(
         f"[END] task_id={task_id} episode_id={episode_id}"
@@ -268,6 +271,12 @@ def main():
             result = {"task_id": task_id, "final_score": 0.01, "total_reward": 0.01}
         results.append(result)
         time.sleep(2)
+    
+    try:
+        raw_avg = sum(r["final_score"] for r in results) / len(results)
+        avg = round(max(0.01, min(0.98, raw_avg)), 4)
+    except Exception:
+        avg = 0.01
 
     # Safely calculate average and guarantee bounds
     if not results:
