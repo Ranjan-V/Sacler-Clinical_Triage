@@ -6,10 +6,10 @@ def enforce_bounds(val: Any) -> float:
     try:
         v = float(val)
         if math.isnan(v) or math.isinf(v):
-            return 0.05
-        return float(max(0.05, min(0.95, round(v, 4))))
+            return 0.1
+        return float(max(0.1, min(0.9, round(v, 2))))
     except Exception:
-        return 0.05
+        return 0.1
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     try:
@@ -28,7 +28,7 @@ def grade_task_easy(observation: Dict[str, Any]) -> float:
         
         return enforce_bounds(score)
     except Exception:
-        return 0.05
+        return 0.1
 
 def grade_task_medium(observation: Dict[str, Any]) -> float:
     try:
@@ -56,7 +56,7 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
         final = (triage_score * 0.6) + (diagnostic_score * 0.2) + (admission_score * 0.2)
         return enforce_bounds(final)
     except Exception:
-        return 0.05
+        return 0.1
 
 def grade_task_hard(observation: Dict[str, Any]) -> float:
     try:
@@ -91,7 +91,7 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
         final = (triage_score * 0.5) + (resource_score * 0.25) + (bed_score * 0.25)
         return enforce_bounds(final)
     except Exception:
-        return 0.05
+        return 0.1
 
 def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
     """Route to correct grader safely without crashing on fake tasks."""
@@ -103,8 +103,8 @@ def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
         }
         
         if task_id not in graders:
-            return 0.05 
+            return 0.1 
             
         return enforce_bounds(graders[task_id](observation))
     except Exception:
-        return 0.05
+        return 0.1
