@@ -226,11 +226,20 @@ def _run_task_inner(task_id: str) -> dict:
     done = False
     action_history = []
 
-    while not done and step_num < max_steps:
+   while not done and step_num < max_steps:
         patients = observation.get("patients", [])
+        # DEBUG: Let's see what we are getting
+        if not patients:
+            print(f"[DEBUG] No patients found in observation: {observation}", flush=True)
+        
         unassigned = [p for p in patients if p.get("current_priority") == "unassigned"]
+        
+        # Change: If no unassigned patients, try to admit someone instead of breaking
         if not unassigned:
-            break
+            # If there are NO patients at all, then we break. 
+            # But if there are patients, just none 'unassigned', we should keep going.
+            if not patients:
+                break
 
         try:
             action = get_agent_action(observation, action_history)
