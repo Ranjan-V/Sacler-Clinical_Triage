@@ -22,9 +22,13 @@ MAX_STEP_REWARD = 0.99
 
 def _norm(value: float, max_possible: float) -> float:
     """Normalise an accumulated reward into the strictly-open interval (0.01, 0.99)."""
-    if max_possible <= 0:
+    try:
+        if float(max_possible) <= 0:
+            return 0.01
+        raw = float(value) / float(max_possible)
+        return float(max(0.01, min(0.99, round(raw, 4))))
+    except (ValueError, TypeError):
         return 0.01
-    return round(max(0.01, min(0.99, float(value) / float(max_possible))), 4)
 
 
 def call_env(method: str, endpoint: str, payload: dict = None) -> dict:
@@ -172,11 +176,10 @@ def _run_task_inner(task_id: str) -> dict:
     episode_id = reset_response.get("episode_id", "unknown")
 
     # max_possible_reward: theoretical ceiling for the entire episode.
-    # Used to normalise running totals into (0.01, 0.99) for every log field.
     max_steps = observation.get("max_steps", 10)
-    max_possible_reward = max_steps * MAX_STEP_REWARD  # e.g. 5×0.99=4.95
+    max_possible_reward = max_steps * MAX_STEP_REWARD  
 
-    raw_total = 0.0      # raw accumulator — never printed directly
+    raw_total = 0.0      
     step_num = 0
     done = False
     action_history = []
@@ -202,13 +205,19 @@ def _run_task_inner(task_id: str) -> dict:
             print(f"[STEP] task_id={task_id} episode_id={episode_id} step={step_num} error={step_result['error']} reward=0.01", flush=True)
             break
 
-        # Individual step reward — environment.py guarantees (0.01, 0.99)
-        reward = step_result.get("reward", 0.01)
-        reward = round(max(0.01, min(0.99, float(reward))), 4)  # extra safety
+        # Safely parse and clamp reward
+        try:
+            raw_step_reward = float(step_result.get("reward", 0.01))
+        except (ValueError, TypeError):
+            raw_step_reward = 0.01
+            
+        reward = float(max(0.01, min(0.99, round(raw_step_reward, 4))))
+        
         done = step_result.get("done", False)
         new_obs = step_result.get("observation", {})
         if new_obs:
             observation = new_obs
+            
         raw_total += reward
         step_num += 1
 
@@ -221,13 +230,18 @@ def _run_task_inner(task_id: str) -> dict:
             flush=True
         )
 
-    # Get final grade — graders return values strictly inside (0, 1) by construction
+    # Get final grade
     grade_result = call_env("POST", "/grade")
-    final_score = grade_result.get("score", 0.01)
-    # Clamp defensively in case the external API returns an unexpected value
-    final_score = round(max(0.01, min(0.99, float(final_score))), 4)
+    
+    # Safely parse and clamp final score
+    try:
+        raw_final_score = float(grade_result.get("score", 0.01))
+    except (ValueError, TypeError):
+        raw_final_score = 0.01
+        
+    final_score = float(max(0.01, min(0.99, round(raw_final_score, 4))))
 
-    # Normalise accumulated total into (0.01, 0.99) — never print raw totals > 1
+    # Normalise accumulated total
     norm_total = _norm(raw_total if raw_total > 0 else 0.01, max_possible_reward)
 
     print(
@@ -240,7 +254,7 @@ def _run_task_inner(task_id: str) -> dict:
     return {
         "task_id": task_id,
         "final_score": final_score,
-        "total_reward": norm_total,  # normalised — always strictly in (0.01, 0.99)
+        "total_reward": norm_total,
     }
 
 
@@ -255,7 +269,16 @@ def main():
         results.append(result)
         time.sleep(2)
 
-    avg = round(sum(r["final_score"] for r in results) / len(results), 4)
+    # Safely calculate average and guarantee bounds
+    if not results:
+        avg = 0.01
+    else:
+        try:
+            raw_avg = sum(r["final_score"] for r in results) / len(results)
+            avg = float(max(0.01, min(0.99, round(raw_avg, 4))))
+        except Exception:
+            avg = 0.01
+
     print(
         f"[SUMMARY] results={json.dumps(results)} average_score={avg}",
         flush=True
