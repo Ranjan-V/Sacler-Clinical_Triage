@@ -374,7 +374,7 @@ class ClinicalTriageEnvironment:
                 for p in self.state.patients
             ],
             "done": self.state.done,
-            "total_reward": self.state.total_reward,
+            "total_reward": round(max(0.02, min(0.98, self.state.total_reward / max(self.state.max_steps, 1))), 4),
         }
 
     def get_state(self) -> Dict[str, Any]:
