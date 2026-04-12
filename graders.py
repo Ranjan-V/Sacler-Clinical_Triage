@@ -1,14 +1,11 @@
 from typing import Dict, Any
 
-def enforce_bounds(val: float) -> float:
-    """Strictly between 0 and 1, never exactly 0.0 or 1.0"""
+def enforce_bounds(val: Any) -> float:
+    """Airtight boundary enforcer to guarantee strictly (0, 1) scores."""
     try:
-        v = float(val)
-        # Clamp to (0.02, 0.98) for extra safety margin
-        v = max(0.02, min(0.98, v))
-        return round(v, 4)
+        return float(max(0.01, min(0.99, round(float(val), 4))))
     except (ValueError, TypeError):
-        return 0.02
+        return 0.01
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     try:
@@ -22,7 +19,7 @@ def grade_task_easy(observation: Dict[str, Any]) -> float:
         if str(current).lower() == "unassigned":
             return 0.01
 
-        total_reward = observation.get("total_reward", 0.0)
+        total_reward = observation.get("total_reward", 0.01)
         score = max(0.05, float(total_reward))
         
         return enforce_bounds(score)
@@ -45,7 +42,6 @@ def grade_task_medium(observation: Dict[str, Any]) -> float:
         has_diagnostics = [p for p in patients if p.get("diagnostics_ordered")]
         diagnostic_score = len(has_diagnostics) / n
 
-        # Account for both int and string variants of ESI Priority to prevent silent zeroing
         admitted_critical = sum(
             1 for p in patients
             if p.get("admitted") and str(p.get("current_priority")) in ("1", "2", "P1", "P2")
@@ -80,7 +76,11 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
         resource_score = max(used, 0) / (initial_total * 0.5)
 
         initial_beds = 4
-        available_beds = int(observation.get("available_beds", initial_beds))
+        try:
+            available_beds = int(observation.get("available_beds", initial_beds))
+        except Exception:
+            available_beds = initial_beds
+            
         beds_used = max(initial_beds - available_beds, 0)
         bed_score = beds_used / max(initial_beds - 1, 1)
 
@@ -90,17 +90,18 @@ def grade_task_hard(observation: Dict[str, Any]) -> float:
         return 0.01
 
 def run_grader(task_id: str, observation: Dict[str, Any]) -> float:
-    """Route to correct grader based on task_id with failsafe fallback."""
-    graders = {
-        "task_easy": grade_task_easy,
-        "task_medium": grade_task_medium,
-        "task_hard": grade_task_hard,
-    }
-    grader = graders.get(task_id)
-    if grader is None:
-        return 0.01  # Silently fallback instead of crashing the pipeline
-    
+    """Route to correct grader safely without crashing on fake tasks."""
     try:
-        return enforce_bounds(grader(observation))
+        graders = {
+            "task_easy": grade_task_easy,
+            "task_medium": grade_task_medium,
+            "task_hard": grade_task_hard,
+        }
+        
+        # If validator feeds a fake task, return 0.01 instead of raising ValueError
+        if task_id not in graders:
+            return 0.01 
+            
+        return enforce_bounds(graders[task_id](observation))
     except Exception:
         return 0.01
