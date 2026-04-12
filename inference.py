@@ -246,7 +246,9 @@ def _run_task_inner(task_id: str) -> dict:
         norm_total = 0.01
     else:
         norm_total = round(max(0.01, min(0.98, raw_total / max(max_possible_reward, 0.01))), 4)
-
+    
+    final_score = round(max(0.02, min(0.98, raw_final_score)), 4)
+    norm_total = round(max(0.02, min(0.98, raw_total / max(max_possible_reward, 0.01))), 4)
     print(
         f"[END] task_id={task_id} episode_id={episode_id}"
         f" total_steps={step_num} total_reward={norm_total}"
@@ -274,7 +276,7 @@ def main():
     
     try:
         raw_avg = sum(r["final_score"] for r in results) / len(results)
-        avg = round(max(0.01, min(0.98, raw_avg)), 4)
+        avg = round(max(0.02, min(0.98, raw_avg)), 4)
     except Exception:
         avg = 0.01
 

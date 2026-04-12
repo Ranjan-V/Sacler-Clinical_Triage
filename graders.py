@@ -1,11 +1,14 @@
 from typing import Dict, Any
 
 def enforce_bounds(val: float) -> float:
-    """Airtight boundary enforcer to guarantee strictly (0, 1) scores."""
+    """Strictly between 0 and 1, never exactly 0.0 or 1.0"""
     try:
-        return float(max(0.01, min(0.99, round(float(val), 4))))
+        v = float(val)
+        # Clamp to (0.02, 0.98) for extra safety margin
+        v = max(0.02, min(0.98, v))
+        return round(v, 4)
     except (ValueError, TypeError):
-        return 0.01
+        return 0.02
 
 def grade_task_easy(observation: Dict[str, Any]) -> float:
     try:
